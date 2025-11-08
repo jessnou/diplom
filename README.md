@@ -1,4 +1,4 @@
-# Lane Departure Warning (LDW) для автобусов
+# Lane Departure Warning (LDW) (Система помощи водителю для предотвращения ДТП)
 
 ## 1. Постановка задачи
 
