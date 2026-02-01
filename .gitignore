@@ -1,0 +1,6 @@
+dat
+venv
+*.pyc
+.vscode
+__pycache__
+*.pth
