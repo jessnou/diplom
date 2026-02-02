@@ -17,7 +17,7 @@ class SingleCamDistanceMeasure(object):
 
 	def __init__(self, object_list: list = ["person", "bicycle", "car", "motorbike", "bus", "truck"] ):
 		self.object_list = object_list
-		self.f = 100 # focal length
+		self.f = 200 # focal length
 		self.distance_points = []
 
 	def __isInsidePolygon(self, pt: tuple, poly: np.ndarray ) -> bool:

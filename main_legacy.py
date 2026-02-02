@@ -1,3 +1,8 @@
+"""Legacy ADAS entrypoint (OpenCV window).
+
+This file was renamed from `main.py` to keep a new desktop GUI entrypoint.
+"""
+
 import os
 import cv2
 import logging
@@ -37,7 +42,7 @@ LOGGER = Logger(None, logging.INFO, logging.INFO)
 # ----------------------------------------------------
 # Project and Model Configuration
 # ----------------------------------------------------
-video_path = r"/home/jessnou/TSU/diplom/data/archive/drivingDataset/normalDay/nD_16.mp4" #Paste video path here
+video_path = r"/home/jessnou/TSU/diplom/data/archive/drivingDataset/normalDay/nD_2.mp4" #Paste video path here
 lane_config = {
     "model_path": r"/home/jessnou/TSU/diplom/TrafficLaneDetector/ufldDetector/exportLib/ultrafastLaneV2/tusimple_res18.onnx", #Paste Lane detection model path here
     "model_type": LaneModelType.UFLD_TUSIMPLE, # Change to UFLDV2_CURVELANE when curved Lane
