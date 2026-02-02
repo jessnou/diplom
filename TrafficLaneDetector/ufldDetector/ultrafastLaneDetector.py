@@ -1,3 +1,4 @@
+from turtle import color
 import scipy.special
 import cv2
 import numpy as np
@@ -24,8 +25,8 @@ class ModelConfig():
 		self.num_lanes = 4
 
 	def init_tusimple_config(self):
-		self.img_w = 1280
-		self.img_h = 720
+		self.img_w = 1920
+		self.img_h = 1080
 		self.griding_num = 100
 		self.cls_num_per_lane = 56
 		self.row_anchor = np.linspace(64, 284, self.cls_num_per_lane)
@@ -134,6 +135,30 @@ class UltrafastLaneDetector(LaneDetectBase):
 
 			lanes_points.append(lane_points)
 		return np.array(lanes_points, dtype=object), np.array(lanes_detected, dtype=object)
+	
+	def draw_lane_poly(self, image, lane_points, color):
+		if lane_points is None or len(lane_points) < 6:
+			return
+
+		lane_points = np.array(lane_points, dtype=np.float32)
+
+		ys = lane_points[:, 1]
+		xs = lane_points[:, 0]
+
+		if len(xs) < 6:
+			return
+
+		fit = np.polyfit(ys, xs, 2)
+
+		y_vals = np.linspace(ys.min(), ys.max(), 50)
+		x_vals = fit[0]*y_vals**2 + fit[1]*y_vals + fit[2]
+
+		pts = np.stack([x_vals, y_vals], axis=1).astype(np.int32)
+		pts = pts.reshape((-1, 1, 2))
+
+		cv2.polylines(image, [pts], False, color, 4)
+
+
 
 	def DetectFrame(self, image : cv2, adjust_lanes : bool = True) -> None:
 		input_tensor = self.__prepare_input(image)
@@ -161,6 +186,10 @@ class UltrafastLaneDetector(LaneDetectBase):
 
 			for lane_point in lane_points:
 				cv2.circle(overlay, (lane_point[0],lane_point[1]), 3, color, thickness=-1)
+
+			self.draw_lane_poly(overlay, lane_points, color)
+			
+
 		image[:] = cv2.addWeighted(overlay, alpha, image, 1 - alpha, 0)
 
 	def DrawAreaOnFrame(self, image : cv2, color : tuple = (255,191,0), alpha: float = 0.85) -> None :

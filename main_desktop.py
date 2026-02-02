@@ -31,11 +31,8 @@ class AppConfig:
 
 def default_config() -> AppConfig:
     lane_config = {
-        "model_path": os.path.join(
-            os.path.dirname(__file__),
-            "TrafficLaneDetector/ufldDetector/exportLib/ultrafastLaneV2/tusimple_res18.onnx",
-        ),
-        "model_type": LaneModelType.UFLD_TUSIMPLE,
+        "model_path": "/home/jessnou/TSU/diplom/TrafficLaneDetector/models/ufldv2_tusimple_res18_320x800.onnx",
+        "model_type": LaneModelType.UFLDV2_TUSIMPLE,
     }
     object_config = {
         "model_path": os.path.join(os.path.dirname(__file__), "yolov8l.onnx"),
@@ -105,7 +102,7 @@ class ADASWindow:
         )
 
         self.cfg = cfg
-        self.processor = ADASProcessor(cfg.lane_config, cfg.object_config, allowed_labels={"person", "car"})
+        self.processor = ADASProcessor(cfg.lane_config, cfg.object_config, allowed_labels={"person", "car", "truck", "bus", "motorbike"})
 
         self.cap: Optional[cv2.VideoCapture] = None
         self.vout: Optional[cv2.VideoWriter] = None

@@ -37,10 +37,10 @@ LOGGER = Logger(None, logging.INFO, logging.INFO)
 # ----------------------------------------------------
 # Project and Model Configuration
 # ----------------------------------------------------
-video_path = r"/home/jessnou/TSU/diplom/data/archive/drivingDataset/normalDay/nD_16.mp4" #Paste video path here
+video_path = r"/home/jessnou/TSU/diplom/data/archive/drivingDataset/normalDay/nD_1.mp4" #Paste video path here
 lane_config = {
-    "model_path": r"/home/jessnou/TSU/diplom/TrafficLaneDetector/ufldDetector/exportLib/ultrafastLaneV2/tusimple_res18.onnx", #Paste Lane detection model path here
-    "model_type": LaneModelType.UFLD_TUSIMPLE, # Change to UFLDV2_CURVELANE when curved Lane
+    "model_path": r"/home/jessnou/TSU/diplom/TrafficLaneDetector/models/ufldv2_tusimple_res18_320x800.onnx", #Paste Lane detection model path here
+    "model_type": LaneModelType.UFLDV2_TUSIMPLE, # Change to UFLDV2_CURVELANE when curved Lane
 }
 
 object_config = {

@@ -36,7 +36,7 @@ class PerspectiveTransformation(object):
         self.M = cv2.getPerspectiveTransform(self.src, self.dst)
         self.M_inv = cv2.getPerspectiveTransform(self.dst, self.src)
 
-    def updateTransformParams(self, left_lanes: Union[list, np.ndarray], right_lanes: Union[list, np.ndarray], type: str = "Default") -> None :
+    def updateTransformParams(self, left_lanes: Union[list, np.ndarray], right_lanes: Union[list, np.ndarray], type: str = "Bottom") -> None :
         """ 
         Update the transition area of the frontal view
 

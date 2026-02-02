@@ -93,15 +93,9 @@ class UltrafastLaneDetectorV2(LaneDetectBase):
 
         # Corrected: Modified the check to be more flexible for different models
         supported_channels = [4, 6]
-
-        output_shape = self.engine.session.get_outputs()[0].shape
-        out_channels = output_shape[-1]
-
-        if out_channels not in supported_channels:
-            raise Exception(
-                f"Output dims is error, got output shape {output_shape}, "
-                f"expected last dim in {supported_channels}"
-            )
+        if len(self.output_names) not in supported_channels:
+            raise Exception(f"Output dims is error, please check model. load {len(self.output_names)} channels not in {supported_channels}.")
+            
             
     def __prepare_input(self, image: cv2) -> np.ndarray:
         img = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
