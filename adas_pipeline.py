@@ -55,12 +55,12 @@ class ControlPanel(object):
         assets_dir = assets_dir or os.path.join(script_dir, "assets")
 
         self.collision_warning_img = load_image_safe(os.path.join(assets_dir, "FCWS-warning.png"), (100, 100))
-        self.collision_prompt_img = load_image_safe(os.path.join(assets_dir, "FCWS-prompt.png"), (100, 100))
-        self.collision_normal_img = load_image_safe(os.path.join(assets_dir, "FCWS-normal.png"), (100, 100))
+        self.collision_prompt_img = load_image_safe(os.path.join(assets_dir, "FCWS-normal.jpg"), (100, 100))
+        self.collision_normal_img = load_image_safe(os.path.join(assets_dir, "FCWS-normal.jpg"), (100, 100))
 
         self.left_curve_img = load_image_safe(os.path.join(assets_dir, "left_turn.png"), (200, 200))
-        self.right_curve_img = load_image_safe(os.path.join(assets_dir, "right_turn.png"), (200, 200))
-        self.keep_straight_img = load_image_safe(os.path.join(assets_dir, "straight.png"), (200, 200))
+        self.right_curve_img = load_image_safe(os.path.join(assets_dir, "right_turn.jpg"), (200, 200))
+        self.keep_straight_img = load_image_safe(os.path.join(assets_dir, "FCWS-normal.jpg"), (200, 200))
         self.determined_img = load_image_safe(os.path.join(assets_dir, "warn.png"), (200, 200))
 
         self.left_lanes_img = load_image_safe(os.path.join(assets_dir, "LTA-left_lanes.png"), (300, 200))
