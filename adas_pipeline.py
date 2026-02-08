@@ -20,8 +20,17 @@ from TrafficLaneDetector.ufldDetector.utils import CurvatureType, LaneModelType,
 def load_image_safe(path: str, size: Tuple[int, int]) -> np.ndarray:
     if os.path.exists(path):
         img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+
         if img is not None:
-            return cv2.resize(img, size)
+            img = cv2.resize(img, size)
+
+            # --- гарантируем 4 канала ---
+            if img.shape[2] == 3:
+                alpha = np.full((img.shape[0], img.shape[1], 1), 255, dtype=np.uint8)
+                img = np.concatenate([img, alpha], axis=2)
+
+            return img
+
     h, w = size[1], size[0]
     return np.zeros((h, w, 4), dtype=np.uint8)
 
@@ -58,13 +67,13 @@ class ControlPanel(object):
         self.collision_prompt_img = load_image_safe(os.path.join(assets_dir, "FCWS-normal.jpg"), (100, 100))
         self.collision_normal_img = load_image_safe(os.path.join(assets_dir, "FCWS-normal.jpg"), (100, 100))
 
-        self.left_curve_img = load_image_safe(os.path.join(assets_dir, "left_turn.png"), (200, 200))
-        self.right_curve_img = load_image_safe(os.path.join(assets_dir, "right_turn.jpg"), (200, 200))
-        self.keep_straight_img = load_image_safe(os.path.join(assets_dir, "FCWS-normal.jpg"), (200, 200))
-        self.determined_img = load_image_safe(os.path.join(assets_dir, "warn.png"), (200, 200))
+        self.left_curve_img = load_image_safe(os.path.join(assets_dir, ""), (200, 200))
+        self.right_curve_img = load_image_safe(os.path.join(assets_dir, ""), (200, 200))
+        self.keep_straight_img = load_image_safe(os.path.join(assets_dir, ""), (200, 200))
+        self.determined_img = load_image_safe(os.path.join(assets_dir, ""), (200, 200))
 
-        self.left_lanes_img = load_image_safe(os.path.join(assets_dir, "LTA-left_lanes.png"), (300, 200))
-        self.right_lanes_img = load_image_safe(os.path.join(assets_dir, "LTA-right_lanes.png"), (300, 200))
+        self.left_lanes_img = load_image_safe(os.path.join(assets_dir, "right_turn.jpg"), (300, 200))
+        self.right_lanes_img = load_image_safe(os.path.join(assets_dir, "left_turn.png"), (300, 200))
 
         self.fps = 0.0
         self.frame_count = 0
@@ -88,7 +97,7 @@ class ControlPanel(object):
         )
         main_show[0 : min_birdview_show.shape[0], -min_birdview_show.shape[1] :] = min_birdview_show
 
-    def DisplaySignsPanel(self, main_show, offset_type, curvature_type):
+    def DisplaySignsPanel(self, main_show, offset_type, curvature_type, collision_type):
         W = 400
         H = 365
         widget = np.copy(main_show[:H, :W])
@@ -139,11 +148,11 @@ class ControlPanel(object):
         )
         cv2.putText(
             main_show,
-            "LKAS : " + curvature_type.value,
+            "FCWS : " + collision_type.value,
             (10, 280),
             fontFace=cv2.FONT_HERSHEY_SIMPLEX,
-            fontScale=0.7,
-            color=self.CurvatureDict[curvature_type],
+            fontScale=0.6,
+            color=self.CollisionDict[collision_type],
             thickness=2,
         )
         cv2.putText(
@@ -310,9 +319,6 @@ class ADASProcessor:
         self.analyzeMsg.UpdateRouteStatus(vehicle_direction, vehicle_curvature)
 
         self.transformView.DrawDetectedOnBirdView(birdview_show, birdview_lanes_points, self.analyzeMsg.offset_msg)
-        if self.logger.clevel == logging.DEBUG:
-            self.transformView.DrawTransformFrontalViewArea(frame_show)
-
         self.laneDetector.DrawDetectedOnFrame(frame_show, self.analyzeMsg.offset_msg)
         self.laneDetector.DrawAreaOnFrame(frame_show, self.displayPanel.CollisionDict[self.analyzeMsg.collision_msg])
         self.objectDetector.DrawDetectedOnFrame(frame_show)
@@ -320,8 +326,7 @@ class ADASProcessor:
         self.distanceDetector.DrawDetectedOnFrame(frame_show)
 
         self.displayPanel.DisplayBirdViewPanel(frame_show, birdview_show)
-        self.displayPanel.DisplaySignsPanel(frame_show, self.analyzeMsg.offset_msg, self.analyzeMsg.curvature_msg)
-        self.displayPanel.DisplayCollisionPanel(frame_show, self.analyzeMsg.collision_msg, object_infer_time, lane_infer_time)
+        self.displayPanel.DisplaySignsPanel(frame_show, self.analyzeMsg.offset_msg, self.analyzeMsg.curvature_msg, self.analyzeMsg.collision_msg)
 
         metrics = ADASMetrics(
             object_infer_s=object_infer_time,

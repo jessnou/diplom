@@ -210,7 +210,6 @@ class PerspectiveTransformation(object):
             return (curvature_direction, curvature), distance_from_center
 
         cv2.putText(img,  'Offset: %.1f m' % distance_from_center, (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 3, (0, 0, 255), 5)
-        cv2.putText(img,  'R : %.1f m' % curvature, (20, 180), cv2.FONT_HERSHEY_SIMPLEX, 3, (0, 0, 255), 5)
         return (curvature_direction, curvature), distance_from_center
 
 

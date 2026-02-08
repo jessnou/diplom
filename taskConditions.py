@@ -92,7 +92,7 @@ class TaskConditions(object):
 		self.vehicle_curvature_record = LimitedList(10)
 		self.transform_status = None
 
-		self.toggle_status = "Default"
+		self.toggle_status = "Bottom"
 		self.toggle_oscillator_status = [False, False]
 		self.toggle_status_counter = {"Offset" : 0,  "Curvae" : 0, "BirdViewAngle" : 0}
 
