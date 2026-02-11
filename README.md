@@ -138,12 +138,10 @@ pip install -r requirements.txt
 ## Запуск
 
 ```bash
-python main_new.py --desktop
-# или
-python main_new.py --legacy
+python main_desktop.py
 ```
 
-Примечание: пути к `.onnx/.trt` моделям задаются в `main_desktop.py:default_config()` (и/или в `main_legacy.py`).
+Примечание: пути к `.onnx/.trt` моделям задаются в `main_desktop.py:default_config()`.
 
 ---
 
