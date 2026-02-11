@@ -140,8 +140,10 @@ pip install -r requirements.txt
 ```bash
 python main_desktop.py
 ```
-
-Примечание: пути к `.onnx/.trt` моделям задаются в `main_desktop.py:default_config()`.
+Примечание:
+Скачать onnx файл моделей детекций https://disk.yandex.ru/d/WxOcpkrGaWXKqA и https://disk.yandex.ru/d/EwUa5qNCmAaDIQ
+И поместить в проект
+ пути к `.onnx/.trt` моделям задаются в `main_desktop.py:default_config()`.
 
 ---
 
