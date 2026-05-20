@@ -69,7 +69,7 @@ class SingleCamDistanceMeasure(object):
 						distance = (self.RefSizeDict[label][0] * self.f)/ (ymax - ymin)
 						distance = distance/12*0.3048 # 1ft = 0.3048 m
 						self.distance_points.append([point_x, point_y, distance])
-					except :
+					except (KeyError, ZeroDivisionError) :
 						pass
  
 	def calcCollisionPoint(self, poly: np.ndarray) -> typing.Union[list, None]:

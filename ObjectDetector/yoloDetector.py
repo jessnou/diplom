@@ -4,16 +4,9 @@ import random
 import logging
 import numpy as np
 from typing import *
-try :
-	import sys
-	from utils import ObjectModelType, hex_to_rgb, NMS, Scaler
-	from core import ObjectDetectBase, RectInfo
-	sys.path.append("..")
-	from coreEngine import TensorRTEngine, OnnxEngine
-except :
-	from .utils import ObjectModelType, hex_to_rgb, NMS, Scaler
-	from .core import ObjectDetectBase, RectInfo
-	from coreEngine import TensorRTEngine, OnnxEngine
+from .utils import ObjectModelType, hex_to_rgb, NMS, Scaler
+from .core import ObjectDetectBase, RectInfo
+from coreEngine import OnnxEngine
 
 class YoloLiteParameters():
 	def __init__(self, model_type, input_shape, num_classes):
@@ -71,10 +64,7 @@ class YoloDetector(ObjectDetectBase, YoloLiteParameters):
 		if (self.logger) :
 			self.logger.debug("model path: %s." % model_path)
 
-		if model_path.endswith('.trt') :
-			self.engine = TensorRTEngine(model_path)
-		else :
-			self.engine = OnnxEngine(model_path)
+		self.engine = OnnxEngine(model_path)
 
 		if (self.logger) :
 			self.logger.info(f'YoloDetector Type : [{self.engine.framework_type}] || Version : [{self.engine.providers}]')
@@ -141,8 +131,8 @@ class YoloDetector(ObjectDetectBase, YoloLiteParameters):
 		if len(nms_results) > 0:
 			for i in nms_results:
 				try :
-					predicted_class = self.class_names[class_ids[i]] 
-				except :
+					predicted_class = self.class_names[class_ids[i]]
+				except (IndexError, KeyError) :
 					predicted_class = "unknown"
 				conf = class_confs[i]
 				bbox = boxes[i]

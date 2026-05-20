@@ -4,16 +4,9 @@ import random
 import logging
 import numpy as np
 from typing import *
-try :
-	import sys
-	from utils import ObjectModelType, hex_to_rgb, Scaler
-	from core import ObjectDetectBase, RectInfo
-	sys.path.append("..")
-	from coreEngine import OnnxEngine
-except :
-	from ObjectDetector.utils import ObjectModelType, hex_to_rgb, Scaler
-	from ObjectDetector.core import ObjectDetectBase, RectInfo
-	from coreEngine import OnnxEngine
+from ObjectDetector.utils import ObjectModelType, hex_to_rgb, Scaler
+from ObjectDetector.core import ObjectDetectBase, RectInfo
+from coreEngine import OnnxEngine
 	
 class EfficientdetDetector(ObjectDetectBase):
 	_defaults = {
@@ -77,7 +70,7 @@ class EfficientdetDetector(ObjectDetectBase):
 					continue
 				try :
 					predicted_class = self.class_names[id] 
-				except :
+				except (IndexError, KeyError) :
 					predicted_class = "unknown"
 				results.append(RectInfo(*bbox, conf=conf, label=predicted_class))
 		return results

@@ -64,16 +64,16 @@ class ControlPanel(object):
         assets_dir = assets_dir or os.path.join(script_dir, "assets")
 
         self.collision_warning_img = load_image_safe(os.path.join(assets_dir, "FCWS-warning.png"), (100, 100))
-        self.collision_prompt_img = load_image_safe(os.path.join(assets_dir, "FCWS-normal.jpg"), (100, 100))
+        self.collision_prompt_img = load_image_safe(os.path.join(assets_dir, "FCWS-prompt.png"), (100, 100))
         self.collision_normal_img = load_image_safe(os.path.join(assets_dir, "FCWS-normal.jpg"), (100, 100))
 
-        self.left_curve_img = load_image_safe(os.path.join(assets_dir, ""), (200, 200))
-        self.right_curve_img = load_image_safe(os.path.join(assets_dir, ""), (200, 200))
-        self.keep_straight_img = load_image_safe(os.path.join(assets_dir, ""), (200, 200))
-        self.determined_img = load_image_safe(os.path.join(assets_dir, ""), (200, 200))
+        self.left_curve_img = load_image_safe(os.path.join(assets_dir, "left_turn.png"), (200, 200))
+        self.right_curve_img = load_image_safe(os.path.join(assets_dir, "right_turn.jpg"), (200, 200))
+        self.keep_straight_img = load_image_safe(os.path.join(assets_dir, "straight.png"), (200, 200))
+        self.determined_img = load_image_safe(os.path.join(assets_dir, "warn.png"), (200, 200))
 
-        self.left_lanes_img = load_image_safe(os.path.join(assets_dir, "right_turn.jpg"), (300, 200))
-        self.right_lanes_img = load_image_safe(os.path.join(assets_dir, "left_turn.png"), (300, 200))
+        self.left_lanes_img = load_image_safe(os.path.join(assets_dir, "LTA-left_lanes.png"), (300, 200))
+        self.right_lanes_img = load_image_safe(os.path.join(assets_dir, "LTA-right_lanes.png"), (300, 200))
 
         self.fps = 0.0
         self.frame_count = 0
@@ -241,98 +241,98 @@ class ADASProcessor:
         self.logger = logger or Logger(None, logging.INFO, logging.INFO)
         self.allowed_labels = {s.lower() for s in allowed_labels} if allowed_labels else None
 
-        self.laneDetector = None
-        self.objectDetector = None
-        self.transformView = None
-        self.distanceDetector = None
-        self.objectTracker = None
-        self.displayPanel = None
-        self.analyzeMsg = None
+        self.lane_detector = None
+        self.object_detector = None
+        self.transform_view = None
+        self.distance_detector = None
+        self.object_tracker = None
+        self.display_panel = None
+        self.analyze_msg = None
 
     def initialize(self, frame_size: Tuple[int, int]) -> None:
         width, height = frame_size
 
         if "UFLDV2" in self.lane_config["model_type"].name:
             UltrafastLaneDetectorV2.set_defaults(self.lane_config)
-            self.laneDetector = UltrafastLaneDetectorV2(logger=self.logger)
+            self.lane_detector = UltrafastLaneDetectorV2(logger=self.logger)
         else:
             UltrafastLaneDetector.set_defaults(self.lane_config)
-            self.laneDetector = UltrafastLaneDetector(logger=self.logger)
+            self.lane_detector = UltrafastLaneDetector(logger=self.logger)
 
-        self.transformView = PerspectiveTransformation((width, height), logger=self.logger)
+        self.transform_view = PerspectiveTransformation((width, height), logger=self.logger)
 
         if ObjectModelType.EfficientDet == self.object_config["model_type"]:
             EfficientdetDetector.set_defaults(self.object_config)
-            self.objectDetector = EfficientdetDetector(logger=self.logger)
+            self.object_detector = EfficientdetDetector(logger=self.logger)
         else:
             YoloDetector.set_defaults(self.object_config)
-            self.objectDetector = YoloDetector(logger=self.logger)
+            self.object_detector = YoloDetector(logger=self.logger)
 
-        self.distanceDetector = SingleCamDistanceMeasure()
-        self.objectTracker = BYTETracker(names=self.objectDetector.colors_dict)
+        self.distance_detector = SingleCamDistanceMeasure()
+        self.object_tracker = BYTETracker(names=self.object_detector.colors_dict)
 
-        self.displayPanel = ControlPanel()
-        self.analyzeMsg = TaskConditions()
+        self.display_panel = ControlPanel()
+        self.analyze_msg = TaskConditions()
 
     def process_frame(self, frame: np.ndarray) -> Tuple[np.ndarray, ADASMetrics]:
-        if self.laneDetector is None or self.objectDetector is None:
+        if self.lane_detector is None or self.object_detector is None:
             raise RuntimeError("ADASProcessor is not initialized. Call initialize(frame_size) first.")
 
         frame_show = frame.copy()
 
         object_time = time.time()
-        self.objectDetector.DetectFrame(frame)
+        self.object_detector.DetectFrame(frame)
         if self.allowed_labels is not None:
-            self.objectDetector._object_info = [
-                obj for obj in self.objectDetector.object_info if str(obj.label).lower() in self.allowed_labels
+            self.object_detector._object_info = [
+                obj for obj in self.object_detector.object_info if str(obj.label).lower() in self.allowed_labels
             ]
         object_infer_time = round(time.time() - object_time, 2)
 
-        boxes = [obj.tolist(format_type="xyxy") for obj in self.objectDetector.object_info]
-        scores = [obj.conf for obj in self.objectDetector.object_info]
-        class_ids = [obj.label for obj in self.objectDetector.object_info]
+        boxes = [obj.tolist(format_type="xyxy") for obj in self.object_detector.object_info]
+        scores = [obj.conf for obj in self.object_detector.object_info]
+        class_ids = [obj.label for obj in self.object_detector.object_info]
 
-        self.objectTracker.update(boxes, scores, class_ids, frame)
+        self.object_tracker.update(boxes, scores, class_ids, frame)
 
         lane_time = time.time()
-        self.laneDetector.DetectFrame(frame)
+        self.lane_detector.DetectFrame(frame)
         lane_infer_time = round(time.time() - lane_time, 4)
 
-        self.distanceDetector.updateDistance(self.objectDetector.object_info)
-        vehicle_distance = self.distanceDetector.calcCollisionPoint(self.laneDetector.lane_info.area_points)
+        self.distance_detector.updateDistance(self.object_detector.object_info)
+        vehicle_distance = self.distance_detector.calcCollisionPoint(self.lane_detector.lane_info.area_points)
 
-        if self.analyzeMsg.CheckStatus() and self.laneDetector.lane_info.area_status:
-            self.transformView.updateTransformParams(
-                *self.laneDetector.lane_info.lanes_points[1:3], self.analyzeMsg.transform_status
+        if self.analyze_msg.CheckStatus() and self.lane_detector.lane_info.area_status:
+            self.transform_view.updateTransformParams(
+                *self.lane_detector.lane_info.lanes_points[1:3], self.analyze_msg.transform_status
             )
 
-        birdview_show = self.transformView.transformToBirdView(frame_show)
+        birdview_show = self.transform_view.transformToBirdView(frame_show)
         birdview_lanes_points = [
-            self.transformView.transformToBirdViewPoints(lanes_point) for lanes_point in self.laneDetector.lane_info.lanes_points
+            self.transform_view.transformToBirdViewPoints(lanes_point) for lanes_point in self.lane_detector.lane_info.lanes_points
         ]
-        (vehicle_direction, vehicle_curvature), vehicle_offset = self.transformView.calcCurveAndOffset(
+        (vehicle_direction, vehicle_curvature), vehicle_offset = self.transform_view.calcCurveAndOffset(
             birdview_show, *birdview_lanes_points[1:3]
         )
 
-        self.analyzeMsg.UpdateCollisionStatus(vehicle_distance, self.laneDetector.lane_info.area_status)
-        self.analyzeMsg.UpdateOffsetStatus(vehicle_offset)
-        self.analyzeMsg.UpdateRouteStatus(vehicle_direction, vehicle_curvature)
+        self.analyze_msg.UpdateCollisionStatus(vehicle_distance, self.lane_detector.lane_info.area_status)
+        self.analyze_msg.UpdateOffsetStatus(vehicle_offset)
+        self.analyze_msg.UpdateRouteStatus(vehicle_direction, vehicle_curvature)
 
-        self.transformView.DrawDetectedOnBirdView(birdview_show, birdview_lanes_points, self.analyzeMsg.offset_msg)
-        self.laneDetector.DrawDetectedOnFrame(frame_show, self.analyzeMsg.offset_msg)
-        self.laneDetector.DrawAreaOnFrame(frame_show, self.displayPanel.CollisionDict[self.analyzeMsg.collision_msg])
-        self.objectDetector.DrawDetectedOnFrame(frame_show)
-        self.objectTracker.DrawTrackedOnFrame(frame_show, False)
-        self.distanceDetector.DrawDetectedOnFrame(frame_show)
+        self.transform_view.DrawDetectedOnBirdView(birdview_show, birdview_lanes_points, self.analyze_msg.offset_msg)
+        self.lane_detector.DrawDetectedOnFrame(frame_show, self.analyze_msg.offset_msg)
+        self.lane_detector.DrawAreaOnFrame(frame_show, self.display_panel.CollisionDict[self.analyze_msg.collision_msg])
+        self.object_detector.DrawDetectedOnFrame(frame_show)
+        self.object_tracker.DrawTrackedOnFrame(frame_show, False)
+        self.distance_detector.DrawDetectedOnFrame(frame_show)
 
-        self.displayPanel.DisplayBirdViewPanel(frame_show, birdview_show)
-        self.displayPanel.DisplaySignsPanel(frame_show, self.analyzeMsg.offset_msg, self.analyzeMsg.curvature_msg, self.analyzeMsg.collision_msg)
+        self.display_panel.DisplayBirdViewPanel(frame_show, birdview_show)
+        self.display_panel.DisplaySignsPanel(frame_show, self.analyze_msg.offset_msg, self.analyze_msg.curvature_msg, self.analyze_msg.collision_msg)
 
         metrics = ADASMetrics(
             object_infer_s=object_infer_time,
             lane_infer_s=lane_infer_time,
-            collision=self.analyzeMsg.collision_msg,
-            offset=self.analyzeMsg.offset_msg,
-            curvature=self.analyzeMsg.curvature_msg,
+            collision=self.analyze_msg.collision_msg,
+            offset=self.analyze_msg.offset_msg,
+            curvature=self.analyze_msg.curvature_msg,
         )
         return frame_show, metrics

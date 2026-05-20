@@ -4,7 +4,7 @@ import numpy as np
 from typing import *
 try :
     from ufldDetector.utils import  lane_colors, OffsetType
-except :
+except ImportError :
     from ..ufldDetector.utils import lane_colors, OffsetType
 
 class PerspectiveTransformation(object):

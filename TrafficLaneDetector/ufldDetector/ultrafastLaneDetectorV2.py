@@ -2,15 +2,9 @@ import cv2
 import numpy as np
 from typing import Tuple
 import sys
-try:
-    from ufldDetector.utils import LaneModelType, OffsetType, lane_colors
-    from TrafficLaneDetector.ufldDetector.core import LaneDetectBase
-    from coreEngine import TensorRTEngine, OnnxEngine
-except:
-    from .utils import LaneModelType, OffsetType, lane_colors
-    from .core import LaneDetectBase
-    sys.path.append("..")
-    from coreEngine import TensorRTEngine, OnnxEngine
+from .utils import LaneModelType, OffsetType, lane_colors
+from .core import LaneDetectBase
+from coreEngine import OnnxEngine
 
 def _softmax(x):
     # Note : 防止 overflow and underflow problem
@@ -79,10 +73,7 @@ class UltrafastLaneDetectorV2(LaneDetectBase):
         if (self.logger):
             self.logger.debug("model path: %s." % model_path)
 
-        if model_path.endswith('.trt'):
-            self.engine = TensorRTEngine(model_path)
-        else:
-            self.engine = OnnxEngine(model_path)
+        self.engine = OnnxEngine(model_path)
 
         if (self.logger):
             self.logger.info(

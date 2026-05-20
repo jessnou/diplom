@@ -30,14 +30,15 @@ class AppConfig:
 
 
 def default_config() -> AppConfig:
+    base_dir = os.path.dirname(os.path.realpath(__file__))
     lane_config = {
-        "model_path": "/home/jessnou/TSU/diplom/TrafficLaneDetector/models/ufldv2_tusimple_res18_320x800.onnx",
+        "model_path": os.path.join(base_dir, "TrafficLaneDetector", "models", "ufldv2_tusimple_res18_320x800.onnx"),
         "model_type": LaneModelType.UFLDV2_TUSIMPLE,
     }
     object_config = {
-        "model_path": os.path.join(os.path.dirname(__file__), "yolov8l.onnx"),
+        "model_path": os.path.join(base_dir, "ObjectDetector", "models", "yolov8l.onnx"),
         "model_type": ObjectModelType.YOLOV8,
-        "classes_path": "./ObjectDetector/models/coco_label.txt",
+        "classes_path": os.path.join(base_dir, "ObjectDetector", "models", "coco_label.txt"),
         "box_score": 0.4,
         "box_nms_iou": 0.5,
     }
