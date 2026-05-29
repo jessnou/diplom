@@ -8,7 +8,7 @@ import onnxruntime
 class EngineBase(abc.ABC):
     def __init__(self, model_path):
         if not os.path.isfile(model_path):
-            raise Exception("The model path [%s] can't not found!" % model_path)
+            raise Exception("The model path [%s] can't be found!" % model_path)
         assert model_path.endswith('.onnx'), 'Model path must be a .onnx file.'
         self._framework_type = None
 
@@ -37,21 +37,42 @@ class EngineBase(abc.ABC):
         return NotImplemented
 
 
+def _create_session_options(num_threads=None):
+    opts = onnxruntime.SessionOptions()
+    opts.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_ENABLE_ALL
+    opts.enable_mem_pattern = True
+    opts.enable_mem_reuse = True
+    opts.execution_mode = onnxruntime.ExecutionMode.ORT_SEQUENTIAL
+    if num_threads is not None and num_threads > 0:
+        opts.intra_op_num_threads = num_threads
+        opts.inter_op_num_threads = 1
+    else:
+        opts.intra_op_num_threads = 0
+        opts.inter_op_num_threads = 0
+    return opts
+
+
 class OnnxEngine(EngineBase):
-    def __init__(self, onnx_file_path):
+    def __init__(self, onnx_file_path, num_threads=None):
         EngineBase.__init__(self, onnx_file_path)
+
+        sess_opts = _create_session_options(num_threads)
 
         providers = onnxruntime.get_available_providers()
         if 'CUDAExecutionProvider' in providers:
             self.session = onnxruntime.InferenceSession(
-                onnx_file_path, providers=['CUDAExecutionProvider']
+                onnx_file_path, sess_opts, providers=['CUDAExecutionProvider']
             )
             print("[INFO] ONNX Runtime using GPU (CUDA)")
         else:
+            if num_threads is None:
+                half_cores = max(1, os.cpu_count() // 2)
+                sess_opts.intra_op_num_threads = half_cores
+                sess_opts.inter_op_num_threads = 1
             self.session = onnxruntime.InferenceSession(
-                onnx_file_path, providers=['CPUExecutionProvider']
+                onnx_file_path, sess_opts, providers=['CPUExecutionProvider']
             )
-            print("[INFO] ONNX Runtime using CPU")
+            print(f"[INFO] ONNX Runtime using CPU (intra_op_threads={sess_opts.intra_op_num_threads})")
 
         self.providers = self.session.get_providers()
         self.engine_dtype = (
