@@ -29,15 +29,28 @@ class AppConfig:
     save_output: bool = True
 
 
-def default_config() -> AppConfig:
+YOLO_MODEL_FILES = {
+    "n": "yolov8n.onnx",
+    "s": "yolov8s.onnx",
+    "m": "yolov8m.onnx",
+    "l": "yolov8l.onnx",
+}
+
+def default_config(yolo_size: str = "n") -> AppConfig:
+    base_dir = os.path.dirname(os.path.realpath(__file__))
+    yolo_file = YOLO_MODEL_FILES.get(yolo_size, "yolov8n.onnx")
+    model_path = os.path.join(base_dir, "ObjectDetector", "models", yolo_file)
+    if not os.path.isfile(model_path):
+        print(f"[WARN] Model {model_path} not found, falling back to yolov8l.onnx")
+        model_path = os.path.join(base_dir, "ObjectDetector", "models", "yolov8l.onnx")
     lane_config = {
-        "model_path": "/home/jessnou/TSU/diplom/TrafficLaneDetector/models/ufldv2_tusimple_res18_320x800.onnx",
+        "model_path": os.path.join(base_dir, "TrafficLaneDetector", "models", "ufldv2_tusimple_res18_320x800.onnx"),
         "model_type": LaneModelType.UFLDV2_TUSIMPLE,
     }
     object_config = {
-        "model_path": os.path.join(os.path.dirname(__file__), "yolov8l.onnx"),
+        "model_path": model_path,
         "model_type": ObjectModelType.YOLOV8,
-        "classes_path": "./ObjectDetector/models/coco_label.txt",
+        "classes_path": os.path.join(base_dir, "ObjectDetector", "models", "coco_label.txt"),
         "box_score": 0.4,
         "box_nms_iou": 0.5,
     }
@@ -87,7 +100,7 @@ class VideoDropLabel:
 
 
 class ADASWindow:
-    def __init__(self, cfg: AppConfig):
+    def __init__(self, cfg: AppConfig, parallel: bool = True, lane_skip_frames: int = 0, downscale: float = 1.0):
         from PySide6.QtCore import QTimer, Qt
         from PySide6.QtGui import QPixmap
         from PySide6.QtWidgets import (
@@ -102,7 +115,11 @@ class ADASWindow:
         )
 
         self.cfg = cfg
-        self.processor = ADASProcessor(cfg.lane_config, cfg.object_config, allowed_labels={"person", "car", "truck", "bus", "motorbike"})
+        self.processor = ADASProcessor(
+            cfg.lane_config, cfg.object_config,
+            allowed_labels={"person", "car", "truck", "bus", "motorbike"},
+            parallel=parallel, lane_skip_frames=lane_skip_frames, downscale=downscale,
+        )
 
         self.cap: Optional[cv2.VideoCapture] = None
         self.vout: Optional[cv2.VideoWriter] = None
@@ -261,9 +278,23 @@ def main() -> None:
     _require_pyside6()
     from PySide6.QtWidgets import QApplication
 
-    cfg = default_config()
+    import argparse
+    parser = argparse.ArgumentParser(description="ADAS Desktop")
+    parser.add_argument("--yolo-size", choices=list(YOLO_MODEL_FILES.keys()), default="n",
+                        help="YOLOv8 model size: n=nano(13MB), s=small, m=medium, l=large(167MB) (default: n)")
+    parser.add_argument("--yolo-path", default=None, help="Path to YOLO ONNX model (overrides --yolo-size)")
+    parser.add_argument("--no-parallel", action="store_true", help="Disable parallel inference")
+    parser.add_argument("--lane-skip", type=int, default=0, help="Skip N lane frames between detections (0=every frame)")
+    parser.add_argument("--downscale", type=float, default=1.0, help="Downscale factor for inference, e.g. 0.5 (default: 1.0)")
+    args = parser.parse_args()
+
+    cfg = default_config(yolo_size=args.yolo_size)
+    if args.yolo_path:
+        cfg.object_config["model_path"] = args.yolo_path
+
     app = QApplication(sys.argv)
-    window = ADASWindow(cfg)
+    window = ADASWindow(cfg, parallel=not args.no_parallel,
+                        lane_skip_frames=args.lane_skip, downscale=args.downscale)
     window.show()
     sys.exit(app.exec())
 

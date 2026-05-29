@@ -4,16 +4,9 @@ import random
 import logging
 import numpy as np
 from typing import *
-try :
-	import sys
-	from utils import ObjectModelType, hex_to_rgb, Scaler
-	from core import ObjectDetectBase, RectInfo
-	sys.path.append("..")
-	from coreEngine import OnnxEngine
-except :
-	from ObjectDetector.utils import ObjectModelType, hex_to_rgb, Scaler
-	from ObjectDetector.core import ObjectDetectBase, RectInfo
-	from coreEngine import OnnxEngine
+from ObjectDetector.utils import ObjectModelType, hex_to_rgb, Scaler
+from ObjectDetector.core import ObjectDetectBase, RectInfo
+from coreEngine import OnnxEngine
 	
 class EfficientdetDetector(ObjectDetectBase):
 	_defaults = {
@@ -23,9 +16,10 @@ class EfficientdetDetector(ObjectDetectBase):
 		"box_score" : 0.6
 	}
 
-	def __init__(self, logger=None, **kwargs):
+	def __init__(self, logger=None, num_threads=None, **kwargs):
 		ObjectDetectBase.__init__(self, logger)
-		self.__dict__.update(kwargs) # and update with user overrides
+		self.__dict__.update(kwargs)
+		self._num_threads = num_threads
 
 		self._initialize_class(self.classes_path)
 		self._initialize_model(self.model_path)
@@ -35,7 +29,7 @@ class EfficientdetDetector(ObjectDetectBase):
 		if (self.logger) :
 			self.logger.debug("model path: %s." % model_path)
 
-		self.engine = OnnxEngine(model_path)
+		self.engine = OnnxEngine(model_path, num_threads=self._num_threads)
 
 		if (self.logger) :
 			self.logger.info(f'EfficientdetDetector Type : [{self.engine.framework_type}] || Version : [{self.engine.providers}]')
@@ -77,7 +71,7 @@ class EfficientdetDetector(ObjectDetectBase):
 					continue
 				try :
 					predicted_class = self.class_names[id] 
-				except :
+				except (IndexError, KeyError) :
 					predicted_class = "unknown"
 				results.append(RectInfo(*bbox, conf=conf, label=predicted_class))
 		return results

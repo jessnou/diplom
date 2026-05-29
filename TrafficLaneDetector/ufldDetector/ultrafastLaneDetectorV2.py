@@ -2,15 +2,9 @@ import cv2
 import numpy as np
 from typing import Tuple
 import sys
-try:
-    from ufldDetector.utils import LaneModelType, OffsetType, lane_colors
-    from TrafficLaneDetector.ufldDetector.core import LaneDetectBase
-    from coreEngine import TensorRTEngine, OnnxEngine
-except:
-    from .utils import LaneModelType, OffsetType, lane_colors
-    from .core import LaneDetectBase
-    sys.path.append("..")
-    from coreEngine import TensorRTEngine, OnnxEngine
+from .utils import LaneModelType, OffsetType, lane_colors
+from .core import LaneDetectBase
+from coreEngine import OnnxEngine
 
 def _softmax(x):
     # Note : 防止 overflow and underflow problem
@@ -61,7 +55,7 @@ class UltrafastLaneDetectorV2(LaneDetectBase):
         "model_type": LaneModelType.UFLDV2_TUSIMPLE,
     }
 
-    def __init__(self, model_path: str = None, model_type: LaneModelType = None, logger=None):
+    def __init__(self, model_path: str = None, model_type: LaneModelType = None, logger=None, num_threads=None):
         LaneDetectBase.__init__(self, logger)
         if (None not in [model_path, model_type]):
             self.model_path, self.model_type = model_path, model_type
@@ -73,16 +67,14 @@ class UltrafastLaneDetectorV2(LaneDetectBase):
             raise Exception("UltrafastLaneDetectorV2 can't use %s type." % self.model_type.name)
         self.cfg = ModelConfig(self.model_type)
 
+        self._num_threads = num_threads
         self._initialize_model(self.model_path)
 
     def _initialize_model(self, model_path: str) -> None:
         if (self.logger):
             self.logger.debug("model path: %s." % model_path)
 
-        if model_path.endswith('.trt'):
-            self.engine = TensorRTEngine(model_path)
-        else:
-            self.engine = OnnxEngine(model_path)
+        self.engine = OnnxEngine(model_path, num_threads=self._num_threads)
 
         if (self.logger):
             self.logger.info(
@@ -190,7 +182,6 @@ class UltrafastLaneDetectorV2(LaneDetectBase):
         self._LaneDetectBase__update_lanes_area(self.lane_info.lanes_points, self.img_height)
 
     def DrawDetectedOnFrame(self, image: cv2, type: OffsetType = OffsetType.UNKNOWN, alpha: float = 0.3) -> None:
-        overlay = image.copy()
         for lane_num, lane_points in enumerate(self.lane_info.lanes_points):
             if (lane_num == 1 and type == OffsetType.RIGHT):
                 color = (0, 0, 255)
@@ -200,12 +191,11 @@ class UltrafastLaneDetectorV2(LaneDetectBase):
                 color = lane_colors[lane_num]
 
             for lane_point in lane_points:
-                cv2.circle(overlay, (lane_point[0], lane_point[1]), 3, color, thickness=-1)
-        image[:] = cv2.addWeighted(overlay, alpha, image, 1 - alpha, 0)
+                cv2.circle(image, (lane_point[0], lane_point[1]), 3, color, thickness=-1)
 
     def DrawAreaOnFrame(self, image: cv2, color: tuple = (255, 191, 0), alpha: float = 0.85) -> None:
         H, W, _ = image.shape
         if (self.lane_info.area_status):
-            lane_segment_img = image.copy()
-            cv2.fillPoly(lane_segment_img, pts=[self.lane_info.area_points], color=color)
-            image[:H, :W, :] = cv2.addWeighted(image, alpha, lane_segment_img, 1 - alpha, 0)
+            overlay = np.zeros_like(image)
+            cv2.fillPoly(overlay, pts=[self.lane_info.area_points], color=color)
+            cv2.addWeighted(overlay, 1 - alpha, image, alpha, 0, dst=image)

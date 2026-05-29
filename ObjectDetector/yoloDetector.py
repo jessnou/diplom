@@ -4,16 +4,9 @@ import random
 import logging
 import numpy as np
 from typing import *
-try :
-	import sys
-	from utils import ObjectModelType, hex_to_rgb, NMS, Scaler
-	from core import ObjectDetectBase, RectInfo
-	sys.path.append("..")
-	from coreEngine import TensorRTEngine, OnnxEngine
-except :
-	from .utils import ObjectModelType, hex_to_rgb, NMS, Scaler
-	from .core import ObjectDetectBase, RectInfo
-	from coreEngine import TensorRTEngine, OnnxEngine
+from .utils import ObjectModelType, hex_to_rgb, NMS, Scaler
+from .core import ObjectDetectBase, RectInfo
+from coreEngine import OnnxEngine
 
 class YoloLiteParameters():
 	def __init__(self, model_type, input_shape, num_classes):
@@ -58,9 +51,10 @@ class YoloDetector(ObjectDetectBase, YoloLiteParameters):
 		"box_nms_iou" : 0.45
 	}
 
-	def __init__(self, logger=None, **kwargs):
+	def __init__(self, logger=None, num_threads=None, **kwargs):
 		ObjectDetectBase.__init__(self, logger)
-		self.__dict__.update(kwargs) # and update with user overrides
+		self.__dict__.update(kwargs)
+		self._num_threads = num_threads
 
 		self._initialize_class(self.classes_path)
 		self._initialize_model(self.model_path)
@@ -71,10 +65,7 @@ class YoloDetector(ObjectDetectBase, YoloLiteParameters):
 		if (self.logger) :
 			self.logger.debug("model path: %s." % model_path)
 
-		if model_path.endswith('.trt') :
-			self.engine = TensorRTEngine(model_path)
-		else :
-			self.engine = OnnxEngine(model_path)
+		self.engine = OnnxEngine(model_path, num_threads=self._num_threads)
 
 		if (self.logger) :
 			self.logger.info(f'YoloDetector Type : [{self.engine.framework_type}] || Version : [{self.engine.providers}]')
@@ -102,10 +93,7 @@ class YoloDetector(ObjectDetectBase, YoloLiteParameters):
 		return blob, scaler
 
 	def __process_output(self, output: np.ndarray) -> Tuple[List[np.ndarray,], list, list, list]:
-		_raw_boxes = []
 		_raw_kpss = []
-		_raw_class_ids = []
-		_raw_class_confs = []
 
 		'''
 		YOLOv5/6/7 outputs shape -> (-1, obj_conf + 5[bbox, cls_conf])
@@ -116,21 +104,26 @@ class YoloDetector(ObjectDetectBase, YoloLiteParameters):
 		
 		output = self.lite_postprocess(output)
 
-		# inference output
-		for detection in output:
-			if (self.model_type in [ObjectModelType.YOLOV8, ObjectModelType.YOLOV9, ObjectModelType.YOLOV10]) :
-				obj_cls_probs = detection[4:]
-			else :
-				obj_cls_probs = detection[5:] * detection[4] # cls_conf * obj_conf 
+		if (self.model_type in [ObjectModelType.YOLOV8, ObjectModelType.YOLOV9, ObjectModelType.YOLOV10]) :
+			obj_cls_probs = output[:, 4:]
+		else :
+			obj_cls_probs = output[:, 5:] * output[:, 4:5]
 
-			classId = np.argmax(obj_cls_probs)
-			classConf = float(obj_cls_probs[classId])
-			if classConf > self.box_score :
-				x, y, w, h = detection[0:4]
-				_raw_class_ids.append(classId)
-				_raw_class_confs.append(classConf)
-				_raw_boxes.append(np.stack([(x - 0.5 * w), (y - 0.5 * h), (x + 0.5 * w), (y + 0.5 * h)], axis=-1))
-		return _raw_boxes, _raw_class_ids, _raw_class_confs, _raw_kpss
+		class_ids = np.argmax(obj_cls_probs, axis=1)
+		class_confs = np.take_along_axis(obj_cls_probs, class_ids[:, np.newaxis], axis=1).squeeze(axis=1)
+		mask = class_confs > self.box_score
+
+		filtered_output = output[mask]
+		filtered_class_ids = class_ids[mask]
+		filtered_class_confs = class_confs[mask]
+
+		x = filtered_output[:, 0]
+		y = filtered_output[:, 1]
+		w = filtered_output[:, 2]
+		h = filtered_output[:, 3]
+		_raw_boxes = np.stack([x - 0.5 * w, y - 0.5 * h, x + 0.5 * w, y + 0.5 * h], axis=-1)
+
+		return _raw_boxes, filtered_class_ids.tolist(), filtered_class_confs.tolist(), _raw_kpss
 
 	def get_nms_results(self, boxes : np.array, class_confs : list, class_ids : list, kpss : np.array) -> List[Tuple[list, list]]:
 		results = []
@@ -141,8 +134,8 @@ class YoloDetector(ObjectDetectBase, YoloLiteParameters):
 		if len(nms_results) > 0:
 			for i in nms_results:
 				try :
-					predicted_class = self.class_names[class_ids[i]] 
-				except :
+					predicted_class = self.class_names[class_ids[i]]
+				except (IndexError, KeyError) :
 					predicted_class = "unknown"
 				conf = class_confs[i]
 				bbox = boxes[i]

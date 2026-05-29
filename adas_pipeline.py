@@ -1,6 +1,7 @@
 import logging
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
@@ -64,21 +65,40 @@ class ControlPanel(object):
         assets_dir = assets_dir or os.path.join(script_dir, "assets")
 
         self.collision_warning_img = load_image_safe(os.path.join(assets_dir, "FCWS-warning.png"), (100, 100))
-        self.collision_prompt_img = load_image_safe(os.path.join(assets_dir, "FCWS-normal.jpg"), (100, 100))
+        self.collision_prompt_img = load_image_safe(os.path.join(assets_dir, "FCWS-prompt.png"), (100, 100))
         self.collision_normal_img = load_image_safe(os.path.join(assets_dir, "FCWS-normal.jpg"), (100, 100))
 
-        self.left_curve_img = load_image_safe(os.path.join(assets_dir, ""), (200, 200))
-        self.right_curve_img = load_image_safe(os.path.join(assets_dir, ""), (200, 200))
-        self.keep_straight_img = load_image_safe(os.path.join(assets_dir, ""), (200, 200))
-        self.determined_img = load_image_safe(os.path.join(assets_dir, ""), (200, 200))
+        self.left_curve_img = load_image_safe(os.path.join(assets_dir, "left_turn.png"), (200, 200))
+        self.right_curve_img = load_image_safe(os.path.join(assets_dir, "right_turn.jpg"), (200, 200))
+        self.keep_straight_img = load_image_safe(os.path.join(assets_dir, "straight.png"), (200, 200))
+        self.determined_img = load_image_safe(os.path.join(assets_dir, "warn.png"), (200, 200))
 
-        self.left_lanes_img = load_image_safe(os.path.join(assets_dir, "right_turn.jpg"), (300, 200))
-        self.right_lanes_img = load_image_safe(os.path.join(assets_dir, "left_turn.png"), (300, 200))
+        self.left_lanes_img = load_image_safe(os.path.join(assets_dir, "LTA-left_lanes.png"), (300, 200))
+        self.right_lanes_img = load_image_safe(os.path.join(assets_dir, "LTA-right_lanes.png"), (300, 200))
+
+        self._alpha_masks = {}
+        self._precompute_alpha_masks()
 
         self.fps = 0.0
         self.frame_count = 0
         self.start = time.time()
         self.curve_status = None
+
+    def _precompute_alpha_masks(self):
+        for name in [
+            "determined_img", "left_curve_img", "right_curve_img",
+            "keep_straight_img", "collision_warning_img",
+            "collision_prompt_img", "collision_normal_img",
+        ]:
+            img = getattr(self, name, None)
+            if img is not None and img.shape[2] == 4:
+                mask = img[:, :, 3]
+                self._alpha_masks[name] = mask.nonzero()
+        for name in ["left_lanes_img", "right_lanes_img"]:
+            img = getattr(self, name, None)
+            if img is not None and img.shape[2] >= 3:
+                mask = img[:, :, 2]
+                self._alpha_masks[name] = mask.nonzero()
 
     def updateFPS(self):
         self.frame_count += 1
@@ -100,40 +120,44 @@ class ControlPanel(object):
     def DisplaySignsPanel(self, main_show, offset_type, curvature_type, collision_type):
         W = 400
         H = 365
-        widget = np.copy(main_show[:H, :W])
-        widget //= 2
-        widget[0:3, :] = [0, 0, 255]
-        widget[-3:-1, :] = [0, 0, 255]
-        widget[:, 0:3] = [0, 0, 255]
-        widget[:, -3:-1] = [0, 0, 255]
-        main_show[:H, :W] = widget
+        main_show[:H, :W] //= 2
+        main_show[0:3, :W] = [0, 0, 255]
+        main_show[H - 3:H - 1, :W] = [0, 0, 255]
+        main_show[:H, 0:3] = [0, 0, 255]
+        main_show[:H, W - 3:W - 1] = [0, 0, 255]
 
         if curvature_type == CurvatureType.UNKNOWN and offset_type in {OffsetType.UNKNOWN, OffsetType.CENTER}:
-            y, x = self.determined_img[:, :, 3].nonzero()
-            main_show[y + 10, x - 100 + W // 2] = self.determined_img[y, x, :3]
+            y, x = self._alpha_masks.get("determined_img", ([], []))
+            if len(y) > 0:
+                main_show[y + 10, x - 100 + W // 2] = self.determined_img[y, x, :3]
             self.curve_status = None
         elif (curvature_type == CurvatureType.HARD_LEFT or self.curve_status == "Left") and (
             curvature_type not in {CurvatureType.EASY_RIGHT, CurvatureType.HARD_RIGHT}
         ):
-            y, x = self.left_curve_img[:, :, 3].nonzero()
-            main_show[y + 10, x - 100 + W // 2] = self.left_curve_img[y, x, :3]
+            y, x = self._alpha_masks.get("left_curve_img", ([], []))
+            if len(y) > 0:
+                main_show[y + 10, x - 100 + W // 2] = self.left_curve_img[y, x, :3]
             self.curve_status = "Left"
         elif (curvature_type == CurvatureType.HARD_RIGHT or self.curve_status == "Right") and (
             curvature_type not in {CurvatureType.EASY_LEFT, CurvatureType.HARD_LEFT}
         ):
-            y, x = self.right_curve_img[:, :, 3].nonzero()
-            main_show[y + 10, x - 100 + W // 2] = self.right_curve_img[y, x, :3]
+            y, x = self._alpha_masks.get("right_curve_img", ([], []))
+            if len(y) > 0:
+                main_show[y + 10, x - 100 + W // 2] = self.right_curve_img[y, x, :3]
             self.curve_status = "Right"
 
         if offset_type == OffsetType.RIGHT:
-            y, x = self.left_lanes_img[:, :, 2].nonzero()
-            main_show[y + 10, x - 150 + W // 2] = self.left_lanes_img[y, x, :3]
+            y, x = self._alpha_masks.get("left_lanes_img", ([], []))
+            if len(y) > 0:
+                main_show[y + 10, x - 150 + W // 2] = self.left_lanes_img[y, x, :3]
         elif offset_type == OffsetType.LEFT:
-            y, x = self.right_lanes_img[:, :, 2].nonzero()
-            main_show[y + 10, x - 150 + W // 2] = self.right_lanes_img[y, x, :3]
+            y, x = self._alpha_masks.get("right_lanes_img", ([], []))
+            if len(y) > 0:
+                main_show[y + 10, x - 150 + W // 2] = self.right_lanes_img[y, x, :3]
         elif curvature_type == CurvatureType.STRAIGHT or self.curve_status == "Straight":
-            y, x = self.keep_straight_img[:, :, 3].nonzero()
-            main_show[y + 10, x - 100 + W // 2] = self.keep_straight_img[y, x, :3]
+            y, x = self._alpha_masks.get("keep_straight_img", ([], []))
+            if len(y) > 0:
+                main_show[y + 10, x - 100 + W // 2] = self.keep_straight_img[y, x, :3]
             self.curve_status = "Straight"
 
         self.updateFPS()
@@ -158,7 +182,7 @@ class ControlPanel(object):
         cv2.putText(
             main_show,
             "FPS  : %.2f" % self.fps,
-            (10, widget.shape[0] - 20),
+            (10, H - 20),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.6,
             (255, 255, 255),
@@ -170,23 +194,24 @@ class ControlPanel(object):
         W = int(main_show.shape[1] * show_ratio)
         H = int(main_show.shape[0] * show_ratio)
 
-        widget = np.copy(main_show[H + 20 : 2 * H, -W - 20 :])
-        widget //= 2
-        widget[0:3, :] = [0, 0, 255]
-        widget[-3:-1, :] = [0, 0, 255]
-        widget[:, -3:-1] = [0, 0, 255]
-        widget[:, 0:3] = [0, 0, 255]
-        main_show[H + 20 : 2 * H, -W - 20 :] = widget
+        main_show[H + 20 : 2 * H, -W - 20 :] //= 2
+        main_show[H + 20 : H + 23, -W - 20 :] = [0, 0, 255]
+        main_show[2 * H - 2 : 2 * H, -W - 20 :] = [0, 0, 255]
+        main_show[H + 20 : 2 * H, -W - 20 : -W - 17] = [0, 0, 255]
+        main_show[H + 20 : 2 * H, -3:] = [0, 0, 255]
 
         if collision_type == CollisionType.WARNING:
-            y, x = self.collision_warning_img[:, :, 3].nonzero()
-            main_show[H + y + 50, (x - W - 5)] = self.collision_warning_img[y, x, :3]
+            y, x = self._alpha_masks.get("collision_warning_img", ([], []))
+            if len(y) > 0:
+                main_show[H + y + 50, (x - W - 5)] = self.collision_warning_img[y, x, :3]
         elif collision_type == CollisionType.PROMPT:
-            y, x = self.collision_prompt_img[:, :, 3].nonzero()
-            main_show[H + y + 50, (x - W - 5)] = self.collision_prompt_img[y, x, :3]
+            y, x = self._alpha_masks.get("collision_prompt_img", ([], []))
+            if len(y) > 0:
+                main_show[H + y + 50, (x - W - 5)] = self.collision_prompt_img[y, x, :3]
         elif collision_type == CollisionType.NORMAL:
-            y, x = self.collision_normal_img[:, :, 3].nonzero()
-            main_show[H + y + 50, (x - W - 5)] = self.collision_normal_img[y, x, :3]
+            y, x = self._alpha_masks.get("collision_normal_img", ([], []))
+            if len(y) > 0:
+                main_show[H + y + 50, (x - W - 5)] = self.collision_normal_img[y, x, :3]
 
         cv2.putText(
             main_show,
@@ -235,104 +260,167 @@ class ADASProcessor:
         object_config: dict,
         logger: Optional[Logger] = None,
         allowed_labels: Optional[set[str]] = None,
+        parallel: bool = True,
+        lane_skip_frames: int = 0,
+        downscale: float = 1.0,
     ):
         self.lane_config = dict(lane_config)
         self.object_config = dict(object_config)
         self.logger = logger or Logger(None, logging.INFO, logging.INFO)
         self.allowed_labels = {s.lower() for s in allowed_labels} if allowed_labels else None
+        self.parallel = parallel
+        self.lane_skip_frames = lane_skip_frames
+        self.downscale = downscale
 
-        self.laneDetector = None
-        self.objectDetector = None
-        self.transformView = None
-        self.distanceDetector = None
-        self.objectTracker = None
-        self.displayPanel = None
-        self.analyzeMsg = None
+        self.lane_detector = None
+        self.object_detector = None
+        self.transform_view = None
+        self.distance_detector = None
+        self.object_tracker = None
+        self.display_panel = None
+        self.analyze_msg = None
+
+        self._executor = ThreadPoolExecutor(max_workers=2) if parallel else None
+        self._frame_idx = 0
+        self._cached_lane_result = None
+        self._small_frame = None
 
     def initialize(self, frame_size: Tuple[int, int]) -> None:
         width, height = frame_size
 
+        num_threads = max(1, (os.cpu_count() or 4) // 2) if self.parallel else None
+
         if "UFLDV2" in self.lane_config["model_type"].name:
             UltrafastLaneDetectorV2.set_defaults(self.lane_config)
-            self.laneDetector = UltrafastLaneDetectorV2(logger=self.logger)
+            self.lane_detector = UltrafastLaneDetectorV2(logger=self.logger, num_threads=num_threads)
         else:
             UltrafastLaneDetector.set_defaults(self.lane_config)
-            self.laneDetector = UltrafastLaneDetector(logger=self.logger)
+            self.lane_detector = UltrafastLaneDetector(logger=self.logger, num_threads=num_threads)
 
-        self.transformView = PerspectiveTransformation((width, height), logger=self.logger)
+        self.transform_view = PerspectiveTransformation((width, height), logger=self.logger)
 
         if ObjectModelType.EfficientDet == self.object_config["model_type"]:
             EfficientdetDetector.set_defaults(self.object_config)
-            self.objectDetector = EfficientdetDetector(logger=self.logger)
+            self.object_detector = EfficientdetDetector(logger=self.logger, num_threads=num_threads)
         else:
             YoloDetector.set_defaults(self.object_config)
-            self.objectDetector = YoloDetector(logger=self.logger)
+            self.object_detector = YoloDetector(logger=self.logger, num_threads=num_threads)
 
-        self.distanceDetector = SingleCamDistanceMeasure()
-        self.objectTracker = BYTETracker(names=self.objectDetector.colors_dict)
+        self.distance_detector = SingleCamDistanceMeasure()
+        self.object_tracker = BYTETracker(names=self.object_detector.colors_dict)
 
-        self.displayPanel = ControlPanel()
-        self.analyzeMsg = TaskConditions()
+        self.display_panel = ControlPanel()
+        self.analyze_msg = TaskConditions()
+
+    def _prepare_frame(self, frame: np.ndarray) -> np.ndarray:
+        if self.downscale >= 1.0:
+            return frame
+        small = cv2.resize(frame, None, fx=self.downscale, fy=self.downscale, interpolation=cv2.INTER_LINEAR)
+        return small
+
+    def _run_detection(self, frame: np.ndarray, run_lane: bool):
+        if self.parallel and self._executor is not None:
+            obj_future = self._executor.submit(self.object_detector.DetectFrame, frame)
+            lane_future = self._executor.submit(self.lane_detector.DetectFrame, frame) if run_lane else None
+
+            obj_exception = obj_future.exception()
+            if obj_exception:
+                raise obj_exception
+            if lane_future is not None:
+                lane_exception = lane_future.exception()
+                if lane_exception:
+                    raise lane_exception
+        else:
+            self.object_detector.DetectFrame(frame)
+            if run_lane:
+                self.lane_detector.DetectFrame(frame)
 
     def process_frame(self, frame: np.ndarray) -> Tuple[np.ndarray, ADASMetrics]:
-        if self.laneDetector is None or self.objectDetector is None:
+        if self.lane_detector is None or self.object_detector is None:
             raise RuntimeError("ADASProcessor is not initialized. Call initialize(frame_size) first.")
 
-        frame_show = frame.copy()
+        infer_frame = self._prepare_frame(frame)
+        run_lane = (self.lane_skip_frames == 0) or (self._frame_idx % (self.lane_skip_frames + 1) == 0)
 
         object_time = time.time()
-        self.objectDetector.DetectFrame(frame)
-        if self.allowed_labels is not None:
-            self.objectDetector._object_info = [
-                obj for obj in self.objectDetector.object_info if str(obj.label).lower() in self.allowed_labels
-            ]
-        object_infer_time = round(time.time() - object_time, 2)
+        if self.parallel and self._executor is not None:
+            obj_future = self._executor.submit(self.object_detector.DetectFrame, infer_frame)
+            lane_future = self._executor.submit(self.lane_detector.DetectFrame, infer_frame) if run_lane else None
 
-        boxes = [obj.tolist(format_type="xyxy") for obj in self.objectDetector.object_info]
-        scores = [obj.conf for obj in self.objectDetector.object_info]
-        class_ids = [obj.label for obj in self.objectDetector.object_info]
+            obj_future.result()
+            object_infer_time = round(time.time() - object_time, 2)
 
-        self.objectTracker.update(boxes, scores, class_ids, frame)
+            if self.allowed_labels is not None:
+                self.object_detector._object_info = [
+                    obj for obj in self.object_detector.object_info if str(obj.label).lower() in self.allowed_labels
+                ]
 
-        lane_time = time.time()
-        self.laneDetector.DetectFrame(frame)
-        lane_infer_time = round(time.time() - lane_time, 4)
+            if lane_future is not None:
+                lane_future.result()
+                lane_infer_time = round(time.time() - object_time, 4)
+                self._cached_lane_result = None
+            else:
+                lane_infer_time = 0.0
+        else:
+            self.object_detector.DetectFrame(infer_frame)
+            if self.allowed_labels is not None:
+                self.object_detector._object_info = [
+                    obj for obj in self.object_detector.object_info if str(obj.label).lower() in self.allowed_labels
+                ]
+            object_infer_time = round(time.time() - object_time, 2)
 
-        self.distanceDetector.updateDistance(self.objectDetector.object_info)
-        vehicle_distance = self.distanceDetector.calcCollisionPoint(self.laneDetector.lane_info.area_points)
+            if run_lane:
+                lane_time = time.time()
+                self.lane_detector.DetectFrame(infer_frame)
+                lane_infer_time = round(time.time() - lane_time, 4)
+                self._cached_lane_result = None
+            else:
+                lane_infer_time = 0.0
 
-        if self.analyzeMsg.CheckStatus() and self.laneDetector.lane_info.area_status:
-            self.transformView.updateTransformParams(
-                *self.laneDetector.lane_info.lanes_points[1:3], self.analyzeMsg.transform_status
+        self._frame_idx += 1
+
+        boxes = [obj.tolist(format_type="xyxy") for obj in self.object_detector.object_info]
+        scores = [obj.conf for obj in self.object_detector.object_info]
+        class_ids = [obj.label for obj in self.object_detector.object_info]
+
+        self.object_tracker.update(boxes, scores, class_ids, frame)
+
+        self.distance_detector.updateDistance(self.object_detector.object_info)
+        vehicle_distance = self.distance_detector.calcCollisionPoint(self.lane_detector.lane_info.area_points)
+
+        if self.analyze_msg.CheckStatus() and self.lane_detector.lane_info.area_status:
+            self.transform_view.updateTransformParams(
+                *self.lane_detector.lane_info.lanes_points[1:3], self.analyze_msg.transform_status
             )
 
-        birdview_show = self.transformView.transformToBirdView(frame_show)
+        frame_show = frame.copy()
+        birdview_show = self.transform_view.transformToBirdView(frame_show)
         birdview_lanes_points = [
-            self.transformView.transformToBirdViewPoints(lanes_point) for lanes_point in self.laneDetector.lane_info.lanes_points
+            self.transform_view.transformToBirdViewPoints(lanes_point) for lanes_point in self.lane_detector.lane_info.lanes_points
         ]
-        (vehicle_direction, vehicle_curvature), vehicle_offset = self.transformView.calcCurveAndOffset(
+        (vehicle_direction, vehicle_curvature), vehicle_offset = self.transform_view.calcCurveAndOffset(
             birdview_show, *birdview_lanes_points[1:3]
         )
 
-        self.analyzeMsg.UpdateCollisionStatus(vehicle_distance, self.laneDetector.lane_info.area_status)
-        self.analyzeMsg.UpdateOffsetStatus(vehicle_offset)
-        self.analyzeMsg.UpdateRouteStatus(vehicle_direction, vehicle_curvature)
+        self.analyze_msg.UpdateCollisionStatus(vehicle_distance, self.lane_detector.lane_info.area_status)
+        self.analyze_msg.UpdateOffsetStatus(vehicle_offset)
+        self.analyze_msg.UpdateRouteStatus(vehicle_direction, vehicle_curvature)
 
-        self.transformView.DrawDetectedOnBirdView(birdview_show, birdview_lanes_points, self.analyzeMsg.offset_msg)
-        self.laneDetector.DrawDetectedOnFrame(frame_show, self.analyzeMsg.offset_msg)
-        self.laneDetector.DrawAreaOnFrame(frame_show, self.displayPanel.CollisionDict[self.analyzeMsg.collision_msg])
-        self.objectDetector.DrawDetectedOnFrame(frame_show)
-        self.objectTracker.DrawTrackedOnFrame(frame_show, False)
-        self.distanceDetector.DrawDetectedOnFrame(frame_show)
+        self.transform_view.DrawDetectedOnBirdView(birdview_show, birdview_lanes_points, self.analyze_msg.offset_msg)
+        self.lane_detector.DrawDetectedOnFrame(frame_show, self.analyze_msg.offset_msg)
+        self.lane_detector.DrawAreaOnFrame(frame_show, self.display_panel.CollisionDict[self.analyze_msg.collision_msg])
+        self.object_detector.DrawDetectedOnFrame(frame_show)
+        self.object_tracker.DrawTrackedOnFrame(frame_show, False)
+        self.distance_detector.DrawDetectedOnFrame(frame_show)
 
-        self.displayPanel.DisplayBirdViewPanel(frame_show, birdview_show)
-        self.displayPanel.DisplaySignsPanel(frame_show, self.analyzeMsg.offset_msg, self.analyzeMsg.curvature_msg, self.analyzeMsg.collision_msg)
+        self.display_panel.DisplayBirdViewPanel(frame_show, birdview_show)
+        self.display_panel.DisplaySignsPanel(frame_show, self.analyze_msg.offset_msg, self.analyze_msg.curvature_msg, self.analyze_msg.collision_msg)
 
         metrics = ADASMetrics(
             object_infer_s=object_infer_time,
             lane_infer_s=lane_infer_time,
-            collision=self.analyzeMsg.collision_msg,
-            offset=self.analyzeMsg.offset_msg,
-            curvature=self.analyzeMsg.curvature_msg,
+            collision=self.analyze_msg.collision_msg,
+            offset=self.analyze_msg.offset_msg,
+            curvature=self.analyze_msg.curvature_msg,
         )
         return frame_show, metrics

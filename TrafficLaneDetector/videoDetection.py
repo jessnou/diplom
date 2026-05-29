@@ -35,7 +35,7 @@ if __name__ == "__main__":
 		try:
 			# Read frame from the video
 			ret, frame = cap.read()
-		except:
+		except Exception:
 			continue
 
 		if ret:	
