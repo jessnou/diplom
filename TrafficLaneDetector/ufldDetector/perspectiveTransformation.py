@@ -1,11 +1,26 @@
 import cv2
 import logging
 import numpy as np
+from dataclasses import dataclass
 from typing import *
+
 try :
     from ufldDetector.utils import  lane_colors, OffsetType
 except ImportError :
     from ..ufldDetector.utils import lane_colors, OffsetType
+
+@dataclass
+class BevConfig:
+    src_top_left_x: float = 0.3
+    src_top_right_x: float = 0.8
+    src_bot_left_x: float = 0.2
+    src_bot_right_x: float = 0.95
+    src_top_y: float = 0.7
+    dst_offset_x: float = 0.25
+    xm_per_pix: float = 3.7 / 700
+    ym_per_pix: float = 30.0 / 720
+    static_mode: bool = False
+    hood_crop_ratio: float = 0.0
 
 class PerspectiveTransformation(object):
     """ This a class for transforming image between frontal view and bird view
@@ -16,23 +31,57 @@ class PerspectiveTransformation(object):
         M (np.array): Matrix to transform image from frontal view to bird view
         M_inv (np.array): Matrix to transform image from bird view to frontal view
     """
-    def __init__(self, img_size=(1280, 720), logger=None ):
+    def __init__(self, img_size=(1280, 720), logger=None, bev_config: BevConfig = None):
         """Init PerspectiveTransformation."""
-        self.img_size = img_size
         self.logger = logger
+        self.bev_config = bev_config or BevConfig()
+        self.xm_per_pix = self.bev_config.xm_per_pix
+        self.ym_per_pix = self.bev_config.ym_per_pix
 
-        self.src = np.float32([(self.img_size[0]*0.3, self.img_size[1]*0.7),     # top-left
-                               (self.img_size[0]*0.2, self.img_size[1]),         # bottom-left
-                               (self.img_size[0]*0.95, self.img_size[1]),        # bottom-right
-                               (self.img_size[0]*0.8, self.img_size[1]*0.7)])    # top-right
-        
-        offset_x = self.img_size[0]/4
+        cfg = self.bev_config
+        W, H = img_size
+
+        self._orig_img_size = (W, H)
+        self._crop_px = int(H * cfg.hood_crop_ratio)
+        H_eff = H - self._crop_px
+        self.img_size = (W, H_eff)
+
+        self.src = np.float32([(W * cfg.src_top_left_x, H * cfg.src_top_y),
+                               (W * cfg.src_bot_left_x, H_eff),
+                               (W * cfg.src_bot_right_x, H_eff),
+                               (W * cfg.src_top_right_x, H * cfg.src_top_y)])
+
+        offset_x = int(W * cfg.dst_offset_x)
         offset_y = 0
-        self.dst = np.float32([(offset_x, offset_y), 
-                                (offset_x, img_size[1]-offset_y),
-                                (img_size[0]-offset_x, img_size[1]-offset_y),
-                                (img_size[0]-offset_x, offset_y),])
-        
+        self.dst = np.float32([(offset_x, offset_y),
+                                (offset_x, H_eff - offset_y),
+                                (W - offset_x, H_eff - offset_y),
+                                (W - offset_x, offset_y)])
+
+        self.M = cv2.getPerspectiveTransform(self.src, self.dst)
+        self.M_inv = cv2.getPerspectiveTransform(self.dst, self.src)
+
+    def rebuildFromConfig(self, bev_config: BevConfig) -> None:
+        self.bev_config = bev_config
+        self.xm_per_pix = bev_config.xm_per_pix
+        self.ym_per_pix = bev_config.ym_per_pix
+        W_orig, H_orig = self._orig_img_size
+        self._crop_px = int(H_orig * bev_config.hood_crop_ratio)
+        H_eff = H_orig - self._crop_px
+        self.img_size = (W_orig, H_eff)
+        cfg = bev_config
+
+        self.src = np.float32([(W_orig * cfg.src_top_left_x, H_orig * cfg.src_top_y),
+                               (W_orig * cfg.src_bot_left_x, H_eff),
+                               (W_orig * cfg.src_bot_right_x, H_eff),
+                               (W_orig * cfg.src_top_right_x, H_orig * cfg.src_top_y)])
+
+        offset_x = int(W_orig * cfg.dst_offset_x)
+        self.dst = np.float32([(offset_x, 0),
+                                (offset_x, H_eff),
+                                (W_orig - offset_x, H_eff),
+                                (W_orig - offset_x, 0)])
+
         self.M = cv2.getPerspectiveTransform(self.src, self.dst)
         self.M_inv = cv2.getPerspectiveTransform(self.dst, self.src)
 
@@ -97,9 +146,8 @@ class PerspectiveTransformation(object):
         Returns:
             Image (np.array): Bird view image
         """
-        # new_size = ( self.img_size[0], int(self.img_size[1]/0.33))
-        # img_input = cv2.resize(img, new_size).astype(np.float32)
-        # img = img_input[self.img_size[1]:-self.img_size[1], :, :]
+        if self._crop_px > 0:
+            img = img[:img.shape[0] - self._crop_px, :]
         return cv2.warpPerspective(img, self.M, self.img_size, flags=flags)
 
 
@@ -130,7 +178,7 @@ class PerspectiveTransformation(object):
         points_array = []
         if (len(points)) :
             for x, y in points :
-                points_array.append([x, y])
+                points_array.append([x, y - self._crop_px])
                 # dst_y = (y/0.33)
                 # if ( (dst_y > self.img_size[1]) and (dst_y <= int(self.img_size[1]/0.33)*(2/3)) ) :
                 #     points_array.append([x, dst_y-self.img_size[1]])
@@ -184,8 +232,8 @@ class PerspectiveTransformation(object):
             # print("left :", leftx[0], leftx[-1])
 
             # Define conversions in x and y from pixels space to meters
-            ym_per_pix = 30/720 # meters per pixel in y dimension
-            xm_per_pix = 3.7/700 # meters per pixel in x dimension
+            ym_per_pix = self.ym_per_pix
+            xm_per_pix = self.xm_per_pix
             y_eval = np.max(ploty)
             # Fit new polynomials to x,y in world space
             left_fit_cr = np.polyfit(ploty*ym_per_pix, leftx*xm_per_pix, 2)
@@ -195,10 +243,11 @@ class PerspectiveTransformation(object):
             right_curverad = ((1 + (2*right_fit_cr[0]*y_eval*ym_per_pix + right_fit_cr[1])**2)**1.5) / np.absolute(2*right_fit_cr[0])
 
             curvature = ((left_curverad + right_curverad) / 2)
-            lane_width = np.absolute(leftx[719] - rightx[719])
+            bottom_row = img.shape[0] - 1
+            lane_width = np.absolute(leftx[bottom_row] - rightx[bottom_row])
 
             lane_xm_per_pix = 3.7 / lane_width
-            veh_pos = ((leftx[719] + rightx[719])  / 2.)
+            veh_pos = ((leftx[bottom_row] + rightx[bottom_row])  / 2.)
 
             cen_pos = (img.shape[1]/ 2.)
             distance_from_center = (veh_pos - cen_pos)* lane_xm_per_pix

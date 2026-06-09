@@ -14,7 +14,7 @@ from ObjectDetector import EfficientdetDetector, YoloDetector
 from ObjectDetector.distanceMeasure import SingleCamDistanceMeasure
 from ObjectDetector.utils import CollisionType, ObjectModelType
 from TrafficLaneDetector import UltrafastLaneDetector, UltrafastLaneDetectorV2
-from TrafficLaneDetector.ufldDetector.perspectiveTransformation import PerspectiveTransformation
+from TrafficLaneDetector.ufldDetector.perspectiveTransformation import BevConfig, PerspectiveTransformation
 from TrafficLaneDetector.ufldDetector.utils import CurvatureType, LaneModelType, OffsetType
 
 
@@ -251,6 +251,7 @@ class ADASMetrics:
     collision: CollisionType
     offset: OffsetType
     curvature: CurvatureType
+    birdview: Optional[np.ndarray] = None
 
 
 class ADASProcessor:
@@ -263,6 +264,8 @@ class ADASProcessor:
         parallel: bool = True,
         lane_skip_frames: int = 0,
         downscale: float = 1.0,
+        bev_config: Optional[BevConfig] = None,
+        bev_debug: bool = False,
     ):
         self.lane_config = dict(lane_config)
         self.object_config = dict(object_config)
@@ -271,6 +274,8 @@ class ADASProcessor:
         self.parallel = parallel
         self.lane_skip_frames = lane_skip_frames
         self.downscale = downscale
+        self.bev_config = bev_config or BevConfig()
+        self.bev_debug = bev_debug
 
         self.lane_detector = None
         self.object_detector = None
@@ -288,6 +293,9 @@ class ADASProcessor:
     def initialize(self, frame_size: Tuple[int, int]) -> None:
         width, height = frame_size
 
+        if self.parallel and self._executor is None:
+            self._executor = ThreadPoolExecutor(max_workers=2)
+
         num_threads = max(1, (os.cpu_count() or 4) // 2) if self.parallel else None
 
         if "UFLDV2" in self.lane_config["model_type"].name:
@@ -297,7 +305,7 @@ class ADASProcessor:
             UltrafastLaneDetector.set_defaults(self.lane_config)
             self.lane_detector = UltrafastLaneDetector(logger=self.logger, num_threads=num_threads)
 
-        self.transform_view = PerspectiveTransformation((width, height), logger=self.logger)
+        self.transform_view = PerspectiveTransformation((width, height), logger=self.logger, bev_config=self.bev_config)
 
         if ObjectModelType.EfficientDet == self.object_config["model_type"]:
             EfficientdetDetector.set_defaults(self.object_config)
@@ -335,7 +343,7 @@ class ADASProcessor:
             if run_lane:
                 self.lane_detector.DetectFrame(frame)
 
-    def process_frame(self, frame: np.ndarray) -> Tuple[np.ndarray, ADASMetrics]:
+    def process_frame(self, frame: np.ndarray, no_hud: bool = False) -> Tuple[np.ndarray, ADASMetrics]:
         if self.lane_detector is None or self.object_detector is None:
             raise RuntimeError("ADASProcessor is not initialized. Call initialize(frame_size) first.")
 
@@ -388,10 +396,14 @@ class ADASProcessor:
         self.distance_detector.updateDistance(self.object_detector.object_info)
         vehicle_distance = self.distance_detector.calcCollisionPoint(self.lane_detector.lane_info.area_points)
 
-        if self.analyze_msg.CheckStatus() and self.lane_detector.lane_info.area_status:
+        if (not self.bev_config.static_mode and not self.bev_debug
+                and self.analyze_msg.CheckStatus() and self.lane_detector.lane_info.area_status):
             self.transform_view.updateTransformParams(
                 *self.lane_detector.lane_info.lanes_points[1:3], self.analyze_msg.transform_status
             )
+
+        if self.bev_debug:
+            self.transform_view.rebuildFromConfig(self.bev_config)
 
         frame_show = frame.copy()
         birdview_show = self.transform_view.transformToBirdView(frame_show)
@@ -413,8 +425,9 @@ class ADASProcessor:
         self.object_tracker.DrawTrackedOnFrame(frame_show, False)
         self.distance_detector.DrawDetectedOnFrame(frame_show)
 
-        self.display_panel.DisplayBirdViewPanel(frame_show, birdview_show)
-        self.display_panel.DisplaySignsPanel(frame_show, self.analyze_msg.offset_msg, self.analyze_msg.curvature_msg, self.analyze_msg.collision_msg)
+        if not no_hud:
+            self.display_panel.DisplayBirdViewPanel(frame_show, birdview_show)
+            self.display_panel.DisplaySignsPanel(frame_show, self.analyze_msg.offset_msg, self.analyze_msg.curvature_msg, self.analyze_msg.collision_msg)
 
         metrics = ADASMetrics(
             object_infer_s=object_infer_time,
@@ -422,5 +435,11 @@ class ADASProcessor:
             collision=self.analyze_msg.collision_msg,
             offset=self.analyze_msg.offset_msg,
             curvature=self.analyze_msg.curvature_msg,
+            birdview=birdview_show,
         )
         return frame_show, metrics
+
+    def cleanup(self):
+        if self._executor is not None:
+            self._executor.shutdown(wait=False)
+            self._executor = None

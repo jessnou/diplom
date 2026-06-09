@@ -7,6 +7,7 @@ import cv2
 
 from adas_pipeline import ADASProcessor
 from ObjectDetector.utils import ObjectModelType
+from TrafficLaneDetector.ufldDetector.perspectiveTransformation import BevConfig
 from TrafficLaneDetector.ufldDetector.utils import LaneModelType
 
 
@@ -27,6 +28,13 @@ class AppConfig:
     lane_config: dict
     object_config: dict
     save_output: bool = True
+    bev_config: BevConfig = None
+    bev_debug: bool = False
+    bev_save: bool = False
+
+    def __post_init__(self):
+        if self.bev_config is None:
+            self.bev_config = BevConfig()
 
 
 YOLO_MODEL_FILES = {
@@ -119,10 +127,13 @@ class ADASWindow:
             cfg.lane_config, cfg.object_config,
             allowed_labels={"person", "car", "truck", "bus", "motorbike"},
             parallel=parallel, lane_skip_frames=lane_skip_frames, downscale=downscale,
+            bev_config=cfg.bev_config, bev_debug=cfg.bev_debug,
         )
 
         self.cap: Optional[cv2.VideoCapture] = None
         self.vout: Optional[cv2.VideoWriter] = None
+        self.bev_vout: Optional[cv2.VideoWriter] = None
+        self.bev_tuner = None
         self.video_path: Optional[str] = None
         self.initialized = False
         self.last_frame_size = None
@@ -145,6 +156,9 @@ class ADASWindow:
         self.stop_btn = QPushButton("Стоп")
         self.stop_btn.clicked.connect(self.stop)
         self.stop_btn.setEnabled(False)
+        self.restart_btn = QPushButton("Рестарт")
+        self.restart_btn.clicked.connect(self.restart)
+        self.restart_btn.setEnabled(False)
 
         self.save_cb = QCheckBox("Сохранять *_out.mp4")
         self.save_cb.setChecked(bool(cfg.save_output))
@@ -154,6 +168,7 @@ class ADASWindow:
         top.addWidget(self.open_btn)
         top.addWidget(self.start_btn)
         top.addWidget(self.stop_btn)
+        top.addWidget(self.restart_btn)
         top.addWidget(self.save_cb)
 
         self.video_label = QLabel("Drop video here")
@@ -184,6 +199,7 @@ class ADASWindow:
             return
         self.video_path = path
         self.path_edit.setText(path)
+        self.restart_btn.setEnabled(True)
         self.status.setText(f"Выбрано: {path}")
 
     def _open_dialog(self):
@@ -221,12 +237,27 @@ class ADASWindow:
             self.initialized = True
             self.last_frame_size = frame_size
 
+        if self.cfg.bev_debug:
+            if self.bev_tuner is None:
+                from TrafficLaneDetector.ufldDetector.bev_tuner import BevTunerWidget
+                self.bev_tuner = BevTunerWidget(self.cfg.bev_config)
+                self.bev_tuner.show()
+            else:
+                self.bev_tuner.refresh_from_config()
+
         if self.save_cb.isChecked():
             out_path = os.path.splitext(self.video_path)[0] + "_out.mp4"
             fourcc = cv2.VideoWriter_fourcc("m", "p", "4", "v")
             self.vout = cv2.VideoWriter(out_path, fourcc, float(fps), (width, height))
         else:
             self.vout = None
+
+        if self.cfg.bev_save:
+            bev_path = os.path.splitext(self.video_path)[0] + "_bev.mp4"
+            fourcc = cv2.VideoWriter_fourcc("m", "p", "4", "v")
+            self.bev_vout = cv2.VideoWriter(bev_path, fourcc, float(fps), (width, height))
+        else:
+            self.bev_vout = None
 
         self.start_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
@@ -240,12 +271,26 @@ class ADASWindow:
         if self.vout is not None:
             self.vout.release()
             self.vout = None
+        if self.bev_vout is not None:
+            self.bev_vout.release()
+            self.bev_vout = None
+        if self.bev_tuner is not None:
+            self.bev_tuner.close()
+            self.bev_tuner = None
         if self.cap is not None:
             self.cap.release()
             self.cap = None
+        self.processor.cleanup()
         self.start_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
         self.status.setText("Остановлено")
+
+    def restart(self):
+        if not self.video_path:
+            return
+        self.stop()
+        self.initialized = False
+        self.start()
 
     def _tick(self):
         from PySide6.QtGui import QPixmap
@@ -263,6 +308,16 @@ class ADASWindow:
 
         if self.vout is not None:
             self.vout.write(frame_show)
+
+        if self.bev_vout is not None and metrics.birdview is not None:
+            self.bev_vout.write(metrics.birdview)
+
+        if self.bev_tuner is not None:
+            self.bev_tuner.update_bev_image(metrics.birdview)
+            self.bev_tuner.update_info(
+                offset=metrics.offset,
+                curvature=metrics.curvature,
+            )
 
         qimg = _bgr_to_qimage(frame_show)
         pixmap = QPixmap.fromImage(qimg)
@@ -286,11 +341,40 @@ def main() -> None:
     parser.add_argument("--no-parallel", action="store_true", help="Disable parallel inference")
     parser.add_argument("--lane-skip", type=int, default=0, help="Skip N lane frames between detections (0=every frame)")
     parser.add_argument("--downscale", type=float, default=1.0, help="Downscale factor for inference, e.g. 0.5 (default: 1.0)")
+
+    bev = parser.add_argument_group("BEV (Bird Eye View)")
+    bev.add_argument("--bev-debug", action="store_true", help="Open BEV tuning window with trackbars")
+    bev.add_argument("--bev-save", action="store_true", help="Save full-size BEV as *_bev.mp4")
+    bev.add_argument("--bev-static", action="store_true", help="Disable dynamic BEV mode switching")
+    bev.add_argument("--bev-top-y", type=float, default=0.7, help="src top Y fraction (default: 0.7)")
+    bev.add_argument("--bev-top-lx", type=float, default=0.3, help="src top-left X fraction (default: 0.3)")
+    bev.add_argument("--bev-bot-lx", type=float, default=0.2, help="src bottom-left X fraction (default: 0.2)")
+    bev.add_argument("--bev-bot-rx", type=float, default=0.95, help="src bottom-right X fraction (default: 0.95)")
+    bev.add_argument("--bev-top-rx", type=float, default=0.8, help="src top-right X fraction (default: 0.8)")
+    bev.add_argument("--bev-dst-offset", type=float, default=0.25, help="dst offset X fraction (default: 0.25)")
+    bev.add_argument("--bev-xm", type=float, default=3.7/700, help="X meters per pixel (default: 3.7/700)")
+    bev.add_argument("--bev-ym", type=float, default=30.0/720, help="Y meters per pixel (default: 30/720)")
+    bev.add_argument("--bev-hood-crop", type=float, default=0.15, help="Hood crop ratio (default: 0.15)")
     args = parser.parse_args()
 
     cfg = default_config(yolo_size=args.yolo_size)
     if args.yolo_path:
         cfg.object_config["model_path"] = args.yolo_path
+
+    cfg.bev_config = BevConfig(
+        src_top_y=args.bev_top_y,
+        src_top_left_x=args.bev_top_lx,
+        src_bot_left_x=args.bev_bot_lx,
+        src_bot_right_x=args.bev_bot_rx,
+        src_top_right_x=args.bev_top_rx,
+        dst_offset_x=args.bev_dst_offset,
+        xm_per_pix=args.bev_xm,
+        ym_per_pix=args.bev_ym,
+        static_mode=args.bev_static,
+        hood_crop_ratio=args.bev_hood_crop,
+    )
+    cfg.bev_debug = args.bev_debug
+    cfg.bev_save = args.bev_save
 
     app = QApplication(sys.argv)
     window = ADASWindow(cfg, parallel=not args.no_parallel,
